@@ -1,0 +1,775 @@
+			DEVICE ZXSPECTRUM48			; sjasmplus directive for SAVESNA at end
+
+Stack_Top:		EQU 0xFFF0
+Code_Start:		EQU 0x7FFD				
+
+SCREEN_BASE     EQU 0x4000              ; Start of pixel memory
+ATTR_BASE       EQU 0x5800              ; Start of attr memory
+
+BLANK_TILE      EQU 63                  ; white paper
+PLAYER_TILE     EQU 24                  ; magenta paper
+
+MAZE_WIDTH      EQU 32
+MAZE_HEIGHT     EQU 16
+
+SPAWNS          EQU 10
+MIN_DIST        EQU 2
+MAX_DIST        EQU 10
+DIST_DELTA      EQU 8
+DEAD_BUILDER    EQU 255
+
+ROW_COUNT       EQU 20
+MAX_BUILDERS    EQU 40
+
+			ORG Code_Start
+
+            jp start                    ; jump past includes
+
+            include "memory.z80"
+            include "random.z80"
+
+start
+            di
+            call clearscreen
+            call setborder
+
+            call generatemaze
+
+            ;call drawlevel
+            ;call drawplayer
+
+mainloop    equ $
+            ;call getplayer                            
+            ;ld (hl), BLANK_TILE         ; delete the player
+
+            ;ld de, 32
+            ; call readkeys               ; check keys
+
+            call waitforkey
+            jp start
+
+           ; draw the new player
+            ;call drawplayer
+
+            ei
+            halt                        ; pause
+            di
+            jp mainloop
+
+waitforkey
+            ei
+            ld hl, 23560                ; last K systemvariable
+            ld (hl), 0                  ; put null there
+waitforkeyloop
+            ld a, (hl)                  ; has it been changed?
+            cp 0
+            jr z, waitforkeyloop
+            di
+            ret
+
+; * readkeys
+;       reads the keyboard and updates the plr, plc
+readkeys
+            ei
+            
+            ld bc, 64510                ; TREWQ
+            in a, (c)
+            rra                         ; Check for Q
+            call nc, mpu                ; move up
+
+            ld bc, 65022                ; GFDSA
+            in a, (c)
+            rra                         ; check for A
+            call nc, mpd                ; move down
+
+            ld bc, 57342                ; YUIOP
+            in a, (c)
+
+            rra                         ; check for P
+            push af
+            call nc, mpr                ; move right
+            pop af
+            rra                         ; check for O
+            call nc, mpl
+
+            di
+
+            ret
+
+; * mpl
+;       move player left
+mpl
+            ld hl, plc                  ; load current column
+            ld a, (hl)
+            and a                       ; is it 0, can't move left
+            ret z
+            dec (hl)                    ; move left
+
+            push hl                     ; store plc
+            call getplayer              ; load new player position into hl
+            ld a, (hl)                  ; check new tile is blank
+            cp BLANK_TILE
+            pop hl                      ; restore plc
+            ret z                       ; return if blank
+            
+            inc (hl)                    ; undo movement
+
+            ret
+
+; * mpr
+;       move player right
+mpr
+            ld hl, plc                  ; load current column
+            ld a, (hl)                  ; is it 31? can't move right
+            cp 31
+            ret z
+            inc (hl)                    ; move right
+
+            push hl                     ; store plc
+            call getplayer              ; load new player location in hl
+            ld a, (hl)                  ; check new tile is blank
+            cp BLANK_TILE
+            pop hl                      ; restore plc
+            ret z                       ; return if blank
+            
+            dec (hl)                    ; undo movement
+
+            ret
+
+; * mpu
+;       move player up
+mpu
+            ld hl, plr                  ; load current row
+            ld a, (hl)                  ; is it 0? can't move up
+            and a
+            ret z
+            dec (hl)                    ; move up
+
+            push hl                     ; store plr
+            call getplayer              ; load new player position in hl
+            ld a, (hl)                  ; check new tile is blank
+            cp BLANK_TILE
+            pop hl                      ; restore plr
+            ret z                       ; return if blank
+            
+            inc (hl)                    ; undo movement
+            ret
+
+; * mpd
+;       move player down
+mpd
+            ld hl, plr                  ; load current row
+            ld a, (hl)                  ; is it 23? can't move down
+            cp 23
+            ret z
+            inc (hl)
+
+            push hl                     ; store plr
+
+            call getplayer              ; load new player position in hl
+            ld a, (hl)                  ; check for blank tile
+            cp BLANK_TILE
+            pop hl                      ; restore plr
+            ret z                       ; return if blank
+
+            dec (hl)                    ; undo movement
+            ret
+            
+; * getplayer: 
+;       returns the player's current position in the attr screen memory in hl
+getplayer
+            push de                     ; save de
+            push af                     ; save af
+
+            ld hl, ATTR_BASE
+            ld bc, (plc)                ; ld plc to c and plr to b in one go
+
+            call ataddr
+
+            pop af                      ; restore af
+            pop de                      ; restore de
+            ret
+
+drawplayer
+            call getplayer
+            ld (hl), e        ; set the paper to magenta
+            ret
+
+drawlevel
+            ld hl, ATTR_BASE            ; Draw in attr
+            ld de, level1               ;
+            ld b, level1_Length
+            xor a                       ; use a to count the number of columns
+drawlevelloop
+            djnz drawcell
+            ret
+
+drawcell
+            push af                     ; store column number on stack
+            ld a, (de)
+            ld (hl), a
+            pop af                      ; restore column number
+            inc hl
+            inc de
+            inc a                       ; next column                
+            cp 8                        ; is it the last column
+            jr nz, drawlevelloop        ; no, draw next
+            xor a                       ; reset a
+            push de
+            ld de, 24                   ;
+            add hl, de
+            pop de
+            jr drawlevelloop
+
+generatemaze
+            call clearmaze              ; clear the buffers
+            call clearspawns
+            call clearbuilders
+
+            call createspawns
+
+nextstep
+            ld ix, builders             ; load ix with builder table
+            ld b, MAX_BUILDERS+1        ; b counts the number of builders
+            ld a, 0                     ; a counts the alive builders
+processnextbuilder
+
+            call processbuilder 
+
+            ld de, 4                    ; each builder in the table is 4 bytes
+            add ix, de
+
+            djnz processnextbuilder
+
+            ei
+    .5      halt
+            di
+
+            ; if builders are still alive, do it again
+            cp 0                        ; compare a to 0
+            jr nz, nextstep
+
+            ; no builders left alive, return
+            ret
+
+createspawns
+            ld b, SPAWNS + 1                    ; three spawn points
+            ld hl, spawnpoints          ; load the spawnpoint data address
+            ld ix, builders             ; point ix to the builders table
+
+createnextspawn
+            djnz createspawn
+            ret
+
+createspawn                             ; we want a random number of builders between 2 and 4
+            call rnd2                   ; get a random 0 or 1,
+            add 2                       ; add 2, gives us 2 or 3
+            ld (hl), a                  ; store this value in the spawn table
+
+            call rnd2
+            call rnd2                   ; get another random 0 or 1
+            add (hl)                    ; add it to the stored value so we can get
+                                        ; 2, 3 or 4 builders
+            ld (hl), a                  ; and store it back into the table
+
+            ; ld (hl), 1                  ; override and set 1 builder
+
+            push hl                     ; store address of spawnpoints
+            push bc                     ; store the number of spawn points
+
+getspawnpoint
+            call rnd16                  ; random row
+            ld b, a                     ; put row into b
+            call rnd4
+            add b
+            ld b, a
+            call rnd32                  ; random column
+            ld c, a                     ; column into c
+
+            call mazeaddr               ; get the address and contents of the spawn point
+            cp 1                        ; if it is 1, then it's already used
+            jr z, getspawnpoint        ; get another point
+
+            ld (hl), 24                  ; mark our spawn point used
+
+            ld de, bc                   ; createbuilders wants row/col in de
+
+            pop bc
+            pop hl
+
+            push bc                     ; store our spawn count
+
+            ld b, (hl)                  ; create b builders
+            inc b                       ; b needs to be 1 more than the number of builders
+
+            call createbuilders
+
+            pop bc                      ; restore our spawn count
+
+            ld de, 4                    ; load size of builder struct into de
+            add ix, de                  ; reference next builder
+            jr createnextspawn
+
+createspawnsdone      
+            ret
+
+; * createbuilders
+;       creates the builders for a spawn point
+;   Inputs:
+;       b: number of builders + 1
+;       d: row
+;       e: column
+createbuilders
+            ld l, 0                     ; store the directions we've already used in l
+nextbuilder
+            djnz createbuilder1
+            ret                         ; all builders built
+
+createbuilder1
+            call createbuilder
+
+            push de
+            ld de, 4                    ; size of the builder struct
+            add ix, de
+            pop de
+
+            jr nextbuilder
+
+createbuilder
+            ld (ix), de                  ; store the column/row
+
+getnewdirection
+            call newdirection
+                                        ; a now has a bit in the correct direction
+            ld c, a                     ;
+            ld a, l                     ; a has the used directions, c has the mask
+
+            and c                       ; mask out the bit
+
+            cp c                        ; subtract c from a
+
+            jr z, getnewdirection         ; direction already used, choose another
+                                        ; we have an unused direction, mark it used
+            ld a, l                     ; restore the used directions to a
+            or c                        ; set the used direction
+            ld l, a                     ; update the used directions
+
+            ld (ix + 2), c              ; set the direction in the builder
+            call rnd16even                  ; random distance
+            ld (ix + 3), a
+            ret
+
+newdirection
+            call rnd4                   ; random direction
+
+            push bc
+            ld b, a                     ; random number in b
+            ld a, 1                     ; get a bit in the correct position to test or set
+nextshift
+            djnz shift
+            jr finishedshift
+
+shift
+            rla                         ; shift the bit into the correct position
+            jr nextshift
+
+finishedshift
+            pop bc
+            ret
+
+processbuilder
+            push af
+
+restartbuilder
+            ld a, (ix)                  ; load col into a
+            cp 255                      ; if 255, then builder is ded
+            jr nz, processbuilder1
+
+            pop af
+            ret
+
+processbuilder1
+            push bc
+
+            ld bc, (ix)                 ; load bc with row/col
+
+            ld a, (ix+3)                ; distance
+            cp 0                        ; if distance is 0, get new direction and new distance
+            jr nz, movebuilder
+            call turnbuilder            ; turn builder
+            call rnd16
+            ld (ix+3), a                ; store new distance
+
+movebuilder
+            ld a, (ix+2)                ; get direction
+            bit 0, a                    ;
+            jr nz, movebuilderleft
+            bit 1, a
+            jr nz, movebuilderdown
+            bit 2, a
+            jr nz, movebuilderright
+            jr movebuilderup
+
+digspace
+            ld bc, (ix)                 ; row in b, col in c
+
+            call mazeaddr
+            cp BLANK_TILE
+
+            pop bc
+
+            jr z, deadbuilder           ; if space already used, builder dies
+
+            pop af
+            ld (hl), BLANK_TILE         ; mark space as used
+            dec (ix+3)
+
+            inc a                       ; increment a to count alive builders
+
+finishedbuilder                         ; builder has been processed
+            ret
+
+; b = row, c = col
+movebuilderleft
+            ld a, c
+            dec a
+            cp 255
+            jr z, zerodistanceandrestart
+            ld (ix), a
+            jr digspace
+
+movebuilderdown
+            ld a, b
+            inc a
+            cp ROW_COUNT
+            jr z, zerodistanceandrestart
+            ld (ix+1), a
+            jr digspace
+
+movebuilderright
+            ld a, c
+            inc a
+            cp 32
+            jr z, zerodistanceandrestart
+            ld (ix), a
+            jr digspace
+
+movebuilderup
+            ld a, b
+            dec a
+            cp 255
+            jr z, zerodistanceandrestart
+            ld (ix+1), a
+            jr digspace
+
+deadbuilder
+            pop af
+            ld (ix), DEAD_BUILDER                    ; mark builder as ded
+            jr finishedbuilder
+
+zerodistanceandrestart
+            ld (ix+3), 0
+            pop bc
+            jp restartbuilder
+
+; * turnbuilder
+;       turns a builder 90 degrees
+;   Inputs:
+;       ix set to builder entry
+;   Outputs:
+;       af changed
+turnbuilder
+            ld a, (ix)                  ; check columns first
+            cp 0                        ; are we in the first column?
+            jp z, turnfirstcolumn
+            cp 31                       ; last column?
+            jp z, turnlastcolumn
+
+            ld a, (ix+1)                ; check row
+            cp 0                        ; are we in the first row?
+            jp z, turnfirstrow
+            cp 15                       ; last row?
+            jp z, turnlastrow
+
+anydirection                            ; we can turn either left or right
+            call rnd2                   ; 0 or 1 in a
+            ex af, af'                  ; store a in shadow
+
+            ld a, (ix+2)                ; current direction in a
+            ld (ix+2), 0                ; reset direction
+
+            cp 1                        ; check for 1
+            jr nz, not1
+
+            ex af, af'                  ; get a back from shadow
+            cp 1                        ; if 1
+            jr nz, setdirectionbit4
+            jr setdirectionbit2
+
+not1
+            cp 2
+            jr nz, not2
+
+            ex af, af'
+            cp 1
+            jr nz, setdirectionbit1
+            jr setdirectionbit3
+
+not2
+            cp 4
+            jr nz, not4
+
+            ex af, af'
+            cp 1
+            jr nz, setdirectionbit2
+            jr setdirectionbit4
+
+not4
+            ex af, af'
+            cp 1
+            jr nz, setdirectionbit3
+            jr setdirectionbit1
+
+setdirectionbit1
+            ld (ix+2), 1
+            ret
+
+setdirectionbit2
+            ld (ix+2), 2
+            ret
+
+setdirectionbit3
+            ld (ix+2), 4
+            ret
+
+setdirectionbit4
+            ld (ix+2), 8
+            ret
+
+turnfirstcolumn
+            ld a, (ix+1)                ; check the row
+            cp 0                        ; top left corner
+            jr z, turntopleft
+
+            cp 20
+            jr z, turnbottomleft
+
+            ld a, (ix+2)                ; current direction
+            cp 1                        ; moving left?
+            jr z, anydirection          ; if moving left, we can move any way
+            ld (ix+2), 4                ; if we were moving up or down, we can go turn right
+            ret
+
+turntopleft
+            ld a, (ix+2)                ; current direction
+            cp 1
+            jr z, turndown
+            ld (ix+2), 4
+            ret
+
+turndown
+            ld (ix+2), 2
+            ret
+
+turnbottomleft
+            ld a, (ix+2)
+            cp 1
+            jr z, turnup
+            ld (ix+2), 4
+            ret
+
+turnup
+            ld (ix+2), 8
+            ret
+
+turnlastcolumn
+            ld a, (ix+1)                ; check the row
+            cp 0                        ; top left corner
+            jr z, turntopright
+
+            cp 20
+            jr z, turnbottomright
+
+            ld a, (ix+2)                ; current direction
+            cp 4                        ; moving right?
+            jp z, anydirection          ; if moving right, we can move any way
+            ld (ix+2), 1                ; if we were moving up or down, we can only go left
+            ret
+
+turntopright
+            ld a, (ix+2)
+            cp 4
+            jr z, turndown
+            ld (ix+2), 1
+            ret
+
+turnbottomright
+            ld a, (ix+2)
+            cp 4
+            jr z, turnup
+            ld (ix+2), 1
+            ret
+
+turnfirstrow
+            ld a, (ix+2)                ; current direction
+            cp 8                        ; moving up?
+            jp z, anydirection          ; if moving up we can move any way
+            ld (ix+2), 2                ; if we were moving left or right, we can only go down
+            ret
+
+turnlastrow
+            ld a, (ix+2)                ; current direction
+            cp 2                        ; moving down?
+            jp z, anydirection          ; if moving down we can move any way
+            ld (ix+2), 8                ; if moving left or right, we  can only move up
+            ret
+
+wait
+            ld bc, $1fff            ; max wait time
+dowait
+            dec bc
+            ld a, b
+            or c
+            jr nz, dowait
+
+            ret
+
+; Sets the entire screen to black
+clearscreen
+            ld bc,24*32-1 ; #of screen attribute bytes
+            ld hl,#5800 ; First attr address
+            ld de,#5801 ; Next attr address
+            ld (hl),0   ; Black on Black
+            ldir        ; Set all attribute bytes
+            ret
+
+setborder
+            out (#fe), a
+            ld b, #86
+            ret
+
+; * mazeaddr
+;       Get the address of attribute location, and contents
+;       row in b
+;       column in c
+;   returns:
+;       address in hl
+;       attribute in a
+mazeaddr
+            call ataddr
+            ret
+            ld a, b                     ; row in b
+            rrca                        ; *32
+            rrca
+            rrca
+            ld e, a                     ; store away
+            and 3                       ; mask bits for high byte
+            ; add a, 88                   ; 88 * 256 = 22528 = ATTR_BASE
+            ld d, a                     ; high byte done
+            ld a, e                     ; Get row * 32 again
+            and 224                     ; mask low byte
+            ld e, a                     ; put in e
+            ld a, c                     ; get the column from c
+            add a, e                    ; add to the low byte
+            ld e, a                     ; de = offset into data
+            ld hl, maze                 ; hl = address of maze data
+            add hl, de                  ; add the offset
+            ld a, (hl)                  ; return attribute contents in a
+            ret
+
+; * ataddr:
+;       Get the address of attribute location, and contents
+;       row in b
+;       column in c
+;   returns:
+;       address in hl
+;       attribute in a
+ataddr
+            ld a, b                     ; row in b
+            rrca                        ; *32
+            rrca
+            rrca
+            ld l, a                     ; store away
+            and 3                       ; mask bits for high byte
+            add a, 88                   ; 88 * 256 = 22528 = ATTR_BASE
+            ld h, a                     ; high byte done
+            ld a, l                     ; Get row * 32 again
+            and 224                     ; mask low byte
+            ld l, a                     ; put in l
+            ld a, c                     ; get the column from c
+            add a, l                    ; add to the low byte
+            ld l, a                     ; hl = address of attributes
+            ld a, (hl)                  ; return attribute contents in a
+            ret
+
+rnddistance
+            call rnd8even
+            add MIN_DIST
+            ret
+
+clearspawns
+            ld hl, spawnpoints          ; ld hl with address of spawnpoints
+            xor a                       ; clear a
+            ld bc, 9                    ; FIXME: How to get length safer?
+            call clearmem
+            ret
+
+clearbuilders
+            ld hl, builders             ; ld hl with address of builders
+            ld a, DEAD_BUILDER
+            ld bc, 159                  ; FIXME
+            call clearmem
+            ret
+
+clearmaze
+            ; ld hl, maze
+            ld hl, ATTR_BASE
+            ld a, 16 ; clear to red
+            ld bc, 639
+            call clearmem
+            ret
+
+plc         db 0
+plr         db 2
+
+dx          db -1, 0, 1, 0
+dy          db 0, -1, 0, 1
+
+
+level1      db 63, 0, 63, 0, 0, 0, 0, 0
+            db 0, 0, 63, 63, 63, 63, 63, 0
+            db 63, 63, 0, 0, 63, 0, 63, 0
+            db 0, 63, 0, 63, 63, 0, 63, 0
+            db 0, 63, 0, 63, 63, 0, 63, 0
+            db 0, 63, 0, 0, 0, 0, 63, 0
+            db 0, 63, 63, 63, 63, 63, 63, 0
+            db 0, 0, 0, 0, 0, 0, 0, 0
+level1_Length:      EQU $-level1+1
+
+; maze is 32 x 16 = 512 bytes
+maze
+            BLOCK 640
+
+; builders table
+; builders struct col, row, dir, dist
+; ld bc, (ix) -> row into b, col into c
+; this can be optimised: row is 0-32 : 5 bits
+;                        col is 0-16 : 4 bits
+;                        dir is 0-4 :  2 bits
+;                        dist is 0-16 : 4 bits
+; rearrange it to be row, dir, col, dist and it will fit into 2 bytes instead of 4
+; have space for up to 4 builders at 10 spawn points
+builders
+            BLOCK 160
+
+; count of the number of builders at each spawn point
+spawnpoints
+            db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+
+
+Code_Length:		EQU $-Code_Start+1
+
+			SAVESNA "maze.sna", Code_Start
+
+; Attribute byte f,b,p,p,p,i,i,i
+; 0=black, 1=blue, 2=red, 3=magenta, 4=green, 5=cyan, 6=yellow, 7=white

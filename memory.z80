@@ -1,0 +1,15 @@
+; * clearmem
+;       clears an area of memory
+;   Inputs:
+;       hl: address to be cleared
+;       bc: length of memory in bytes
+;        a: contents of memory
+clearmem
+            ld e, l
+            ld d, h
+            inc de
+
+            ld (hl), a
+
+            ldir
+            ret

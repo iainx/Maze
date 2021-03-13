@@ -1,0 +1,76 @@
+rnd2
+            call random                 ; get random number between 0-255 in a
+            and 1                       ; limit it to 0 - 1
+            ret
+
+rnd4
+            call random                 ; get random number between 0-255 in a
+            and 3                       ; limit it to 0 - 3
+            ret
+
+rnd8
+            call random                 ; get random number between 0-255 in a
+            and 7                       ; limit it to 0 - 7
+            ret
+
+rnd8even
+            call random
+            and %00000110               ; limit it to 0 - 7 but clear last bit
+            ret
+
+rnd16
+            call random                 ; get random number between 0-255 in a
+            and 15                      ; limit it to 0 - 15
+            ret
+
+rnd16even
+            call random
+            and %00001110               ; Limit it to 0-15, clear last bit to make even
+            ret
+
+
+rnd32
+            call random                 ; get random number between 0-255 in a
+            and 31                      ; limit it to 0 - 31
+            ret
+
+
+;-----> Generate a random number
+; output a=answer 0<=a<=255
+; all registers are preserved except: af
+random:
+        push    hl
+        push    de
+        ld      hl,(randData)
+        ld      a,r
+        ld      d,a
+        ld      e,(hl)
+        add     hl,de
+        add     a,l
+        xor     h
+        ld      (randData),hl
+        pop     de
+        pop     hl
+        ret
+
+; 206, 439, 501, 32, 98
+randData        dw 1
+
+; * random
+;       PRNG
+;   returns:
+;       Random number in a
+randomrom
+            push hl
+            ld hl, (seed)               ; pointer into ROM somewhere
+            ld a, h
+            and 31                      ; keep it within the first 8k of memory
+            ld h, a                     ;
+            ld a, (hl)                  ; Get "random" number from location
+            inc hl
+            ld (seed), hl               ; store new location for next time
+
+            pop hl
+            ret
+
+seed        dw 4
