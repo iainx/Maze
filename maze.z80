@@ -67,22 +67,26 @@ waitforkeyloop
             di
             ret
 
+Row_TREWQ               EQU 64510
+Row_GFDSA               EQU 65022
+Row_YUIOP               EQU 57342
+
 ; * readkeys
 ;       reads the keyboard and updates the plr, plc
 readkeys
             ei
             
-            ld bc, 64510                ; TREWQ
+            ld bc, Row_TREWQ
             in a, (c)
             rra                         ; Check for Q
             call nc, mpu                ; move up
 
-            ld bc, 65022                ; GFDSA
+            ld bc, Row_GFDSA
             in a, (c)
             rra                         ; check for A
             call nc, mpd                ; move down
 
-            ld bc, 57342                ; YUIOP
+            ld bc, Row_YUIOP
             in a, (c)
 
             rra                         ; check for P
@@ -306,7 +310,7 @@ getspawnpoint
 
             pop bc                      ; restore our spawn count
 
-            ld de, 4                    ; load size of builder struct into de
+            ld de, Builder_DataSize     ; load size of builder struct into de
             add ix, de                  ; reference next builder
             jr createnextspawn
 
@@ -329,7 +333,7 @@ createbuilder1
             call createbuilder
 
             push de
-            ld de, 4                    ; size of the builder struct
+            ld de, Builder_DataSize     ; size of the builder struct
             add ix, de
             pop de
 
@@ -354,9 +358,9 @@ getnewdirection
             or c                        ; set the used direction
             ld l, a                     ; update the used directions
 
-            ld (ix + 2), c              ; set the direction in the builder
+            ld (ix + Builder_Direction), c              ; set the direction in the builder
             call rnd16even                  ; random distance
-            ld (ix + 3), a
+            ld (ix + Builder_Distance), a
             ret
 
 newdirection
@@ -381,7 +385,7 @@ processbuilder
             push af
 
 restartbuilder
-            ld a, (ix)                  ; load col into a
+            ld a, (ix+Builder_Column)                  ; load col into a
             cp 255                      ; if 255, then builder is ded
             jr nz, processbuilder1
 
@@ -391,17 +395,17 @@ restartbuilder
 processbuilder1
             push bc
 
-            ld bc, (ix)                 ; load bc with row/col
+            ld bc, (ix+Builder_RowColumn)                 ; load bc with row/col
 
-            ld a, (ix+3)                ; distance
+            ld a, (ix+Builder_Distance)
             cp 0                        ; if distance is 0, get new direction and new distance
             jr nz, movebuilder
             call turnbuilder            ; turn builder
             call rnd16
-            ld (ix+3), a                ; store new distance
+            ld (ix+Builder_Distance), a                ; store new distance
 
 movebuilder
-            ld a, (ix+2)                ; get direction
+            ld a, (ix+Builder_Direction)                ; get direction
             bit 0, a                    ;
             jr nz, movebuilderleft
             bit 1, a
@@ -411,7 +415,7 @@ movebuilder
             jr movebuilderup
 
 digspace
-            ld bc, (ix)                 ; row in b, col in c
+            ld bc, (ix+Builder_RowColumn)                 ; row in b, col in c
 
             call mazeaddr
             cp BLANK_TILE
@@ -422,7 +426,7 @@ digspace
 
             pop af
             ld (hl), BLANK_TILE         ; mark space as used
-            dec (ix+3)
+            dec (ix+Builder_Distance)
 
             inc a                       ; increment a to count alive builders
 
@@ -435,7 +439,7 @@ movebuilderleft
             dec a
             cp 255
             jr z, zerodistanceandrestart
-            ld (ix), a
+            ld (ix+Builder_Column), a
             jr digspace
 
 movebuilderdown
@@ -443,7 +447,7 @@ movebuilderdown
             inc a
             cp ROW_COUNT
             jr z, zerodistanceandrestart
-            ld (ix+1), a
+            ld (ix+Builder_Row), a
             jr digspace
 
 movebuilderright
@@ -451,7 +455,7 @@ movebuilderright
             inc a
             cp 32
             jr z, zerodistanceandrestart
-            ld (ix), a
+            ld (ix+Builder_Column), a
             jr digspace
 
 movebuilderup
@@ -459,16 +463,16 @@ movebuilderup
             dec a
             cp 255
             jr z, zerodistanceandrestart
-            ld (ix+1), a
+            ld (ix+Builder_Row), a
             jr digspace
 
 deadbuilder
             pop af
-            ld (ix), DEAD_BUILDER                    ; mark builder as ded
+            ld (ix+Builder_Column), DEAD_BUILDER                    ; mark builder as ded
             jr finishedbuilder
 
 zerodistanceandrestart
-            ld (ix+3), 0
+            ld (ix+Builder_Distance), 0
             pop bc
             jp restartbuilder
 
@@ -479,13 +483,13 @@ zerodistanceandrestart
 ;   Outputs:
 ;       af changed
 turnbuilder
-            ld a, (ix)                  ; check columns first
+            ld a, (ix+Builder_Column)                  ; check columns first
             cp 0                        ; are we in the first column?
             jp z, turnfirstcolumn
             cp 31                       ; last column?
             jp z, turnlastcolumn
 
-            ld a, (ix+1)                ; check row
+            ld a, (ix+Builder_Row)                ; check row
             cp 0                        ; are we in the first row?
             jp z, turnfirstrow
             cp 15                       ; last row?
@@ -495,8 +499,8 @@ anydirection                            ; we can turn either left or right
             call rnd2                   ; 0 or 1 in a
             ex af, af'                  ; store a in shadow
 
-            ld a, (ix+2)                ; current direction in a
-            ld (ix+2), 0                ; reset direction
+            ld a, (ix+Builder_Row)                ; current direction in a
+            ld (ix+Builder_Row), 0                ; reset direction
 
             cp 1                        ; check for 1
             jr nz, not1
@@ -531,97 +535,97 @@ not4
             jr setdirectionbit1
 
 setdirectionbit1
-            ld (ix+2), 1
+            ld (ix+Builder_Direction), 1
             ret
 
 setdirectionbit2
-            ld (ix+2), 2
+            ld (ix+Builder_Direction), 2
             ret
 
 setdirectionbit3
-            ld (ix+2), 4
+            ld (ix+Builder_Direction), 4
             ret
 
 setdirectionbit4
-            ld (ix+2), 8
+            ld (ix+Builder_Direction), 8
             ret
 
 turnfirstcolumn
-            ld a, (ix+1)                ; check the row
+            ld a, (ix+Builder_Row)                ; check the row
             cp 0                        ; top left corner
             jr z, turntopleft
 
             cp 20
             jr z, turnbottomleft
 
-            ld a, (ix+2)                ; current direction
+            ld a, (ix+Builder_Direction)                ; current direction
             cp 1                        ; moving left?
             jr z, anydirection          ; if moving left, we can move any way
-            ld (ix+2), 4                ; if we were moving up or down, we can go turn right
+            ld (ix+Builder_Direction), 4                ; if we were moving up or down, we can go turn right
             ret
 
 turntopleft
-            ld a, (ix+2)                ; current direction
+            ld a, (ix+Builder_Direction)                ; current direction
             cp 1
             jr z, turndown
-            ld (ix+2), 4
+            ld (ix+Builder_Direction), 4
             ret
 
 turndown
-            ld (ix+2), 2
+            ld (ix+Builder_Direction), 2
             ret
 
 turnbottomleft
-            ld a, (ix+2)
+            ld a, (ix+Builder_Direction)
             cp 1
             jr z, turnup
-            ld (ix+2), 4
+            ld (ix+Builder_Direction), 4
             ret
 
 turnup
-            ld (ix+2), 8
+            ld (ix+Builder_Direction), 8
             ret
 
 turnlastcolumn
-            ld a, (ix+1)                ; check the row
+            ld a, (ix+Builder_Row)                ; check the row
             cp 0                        ; top left corner
             jr z, turntopright
 
             cp 20
             jr z, turnbottomright
 
-            ld a, (ix+2)                ; current direction
+            ld a, (ix+Builder_Direction)                ; current direction
             cp 4                        ; moving right?
             jp z, anydirection          ; if moving right, we can move any way
-            ld (ix+2), 1                ; if we were moving up or down, we can only go left
+            ld (ix+Builder_Direction), 1                ; if we were moving up or down, we can only go left
             ret
 
 turntopright
-            ld a, (ix+2)
+            ld a, (ix+Builder_Direction)
             cp 4
             jr z, turndown
-            ld (ix+2), 1
+            ld (ix+Builder_Direction), 1
             ret
 
 turnbottomright
-            ld a, (ix+2)
+            ld a, (ix+Builder_Direction)
             cp 4
             jr z, turnup
-            ld (ix+2), 1
+            ld (ix+Builder_Direction), 1
             ret
 
 turnfirstrow
-            ld a, (ix+2)                ; current direction
+            ld a, (ix+Builder_Direction)                ; current direction
             cp 8                        ; moving up?
             jp z, anydirection          ; if moving up we can move any way
-            ld (ix+2), 2                ; if we were moving left or right, we can only go down
+            ld (ix+Builder_Direction), 2                ; if we were moving left or right, we can only go down
             ret
 
 turnlastrow
-            ld a, (ix+2)                ; current direction
+            ld a, (ix+Builder_Direction)                ; current direction
             cp 2                        ; moving down?
             jp z, anydirection          ; if moving down we can move any way
-            ld (ix+2), 8                ; if moving left or right, we  can only move up
+            ld (ix+Builder_Direction), 8                ; if moving left or right, we  can only move up
             ret
 
 wait
@@ -656,7 +660,7 @@ setborder
 ;       address in hl
 ;       attribute in a
 mazeaddr
-            call ataddr
+            call ataddr                 ; Currently draw to screen, not buffer
             ret
             ld a, b                     ; row in b
             rrca                        ; *32
@@ -732,10 +736,6 @@ clearmaze
 plc         db 0
 plr         db 2
 
-dx          db -1, 0, 1, 0
-dy          db 0, -1, 0, 1
-
-
 level1      db 63, 0, 63, 0, 0, 0, 0, 0
             db 0, 0, 63, 63, 63, 63, 63, 0
             db 63, 63, 0, 0, 63, 0, 63, 0
@@ -746,7 +746,7 @@ level1      db 63, 0, 63, 0, 0, 0, 0, 0
             db 0, 0, 0, 0, 0, 0, 0, 0
 level1_Length:      EQU $-level1+1
 
-; maze is 32 x 16 = 512 bytes
+; maze is 32 x 20 = 640 bytes
 maze
             BLOCK 640
 
@@ -759,6 +759,13 @@ maze
 ;                        dist is 0-16 : 4 bits
 ; rearrange it to be row, dir, col, dist and it will fit into 2 bytes instead of 4
 ; have space for up to 4 builders at 10 spawn points
+Builder_RowColumn   EQU 0x00            ; for loading row/column at once
+Builder_Column      EQU 0x00
+Builder_Row         EQU 0x01
+Builder_Direction   EQU 0x02
+Builder_Distance    EQU 0x03
+Builder_DataSize    EQU 0x04
+
 builders
             BLOCK 160
 
